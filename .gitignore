@@ -34,3 +34,9 @@
 # Code::Blocks files
 *.depend
 *.layout
+
+# CMake files
+CMakeCache.txt
+Makefile
+CMakeFiles/*
+cmake_install.cmake
