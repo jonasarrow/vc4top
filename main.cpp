@@ -23,6 +23,8 @@
 #include <memory.h>
 #include <chrono>
 #include <thread>
+#include <gtk/gtk.h>
+#include "gtk_window.xml.h"
 using namespace std;
 volatile unsigned* base=0;
 
@@ -61,7 +63,7 @@ void start_counters()
         set_counter_source(i, 13+i);
     }
 }
-int main()
+int main(int argc, char *argv[])
 {
     int fd=0;
     if((fd=open("/dev/mem", O_RDWR|O_SYNC))<0){
@@ -80,6 +82,16 @@ int main()
         return -2;
     }
     close(fd);
+    
+    gtk_init(&argc,&argv);
+	GtkBuilder*build=gtk_builder_new_from_string((const gchar*)gtk_window_xml,sizeof(gtk_window_xml));
+    gtk_builder_connect_signals(build, nullptr);
+    GtkWidget*mainwindow=GTK_WIDGET(gtk_builder_get_object(build,"mainwindow"));
+    gtk_widget_show_all(mainwindow);
+    gtk_main();
+    g_object_unref(G_OBJECT(build));
+    
+
     uint32_t old_vals[7]={};
     auto old_ts=chrono::high_resolution_clock::now();
     bool started=false;
