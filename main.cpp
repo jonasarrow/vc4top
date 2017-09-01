@@ -31,11 +31,13 @@
 #include <memory.h>
 #include <gtk/gtk.h>
 #include "gtk_window.xml.h"
+#include "drawing.h"
 
 
 using namespace std;
 using namespace std::chrono;
 //Constants, may be incorporated in some user setting (if you program it)
+//BUG_ON(decltype(sampling_interval)!=decltype(update_interval))
 auto sampling_interval = 100ms;
 auto update_interval = 500ms;
 
@@ -61,8 +63,10 @@ struct window{
 	GtkWidget*mainwindow,
 		*frequency,
 		*idle,
-		*stall,
-		*busy,
+		*stall_tmu,
+		*stall_sb,
+		*stall_vary,
+		*valid,
 		*vertex,
 		*fragment,
 		*plot;
@@ -121,6 +125,7 @@ void counter_loop(window*w)
 		last_sampling_time = now;
 		//Update all counters
 		if (get_counter(0) == POWEROFF_VALUE) {
+			clear_counter(0);//Reset counter
 			current.idle_count++;
 			idling = true;
 		}
@@ -131,9 +136,10 @@ void counter_loop(window*w)
 			}
 			for (int i = 0; i < ACTIVE_COUNTERS; ++i) {
 				uint32_t value = get_counter(i);
-				clear_counter(i);
 				current.counts[i] += value;
 			}
+			//Simply start the counters always after reading
+			start_counters();
 		}
 		if (now > last_update_time + update_interval) {
 			counter_status diff = current - last_update;
@@ -150,58 +156,88 @@ void counter_loop(window*w)
 }
 G_MODULE_EXPORT extern "C" gboolean plot_draw_cb(GtkWidget*area, cairo_t*cr, gpointer ptr)
 {
+	std::vector<counter_status>pi;
 	window*w = (window*)ptr;
-	std::lock_guard<std::mutex>l(w->lock);
-	if (!w->plotinfo.size())
-		return FALSE;
+	{
+		
+		std::lock_guard<std::mutex>l(w->lock);
+		if (!w->plotinfo.size())
+			return FALSE;
+		
+
+		//Only display the last 100 records
+		if (w->plotinfo.size() > 100)
+			w->plotinfo.erase(w->plotinfo.begin(), w->plotinfo.begin() + (w->plotinfo.size() - 100));
+		pi = w->plotinfo;
+		//End w->lock lock
+	}
+	//The current counter values
+	counter_status diff = *(pi.rbegin());
+	//Draw the graphical stats
 	guint width = gtk_widget_get_allocated_width(area);
 	guint height = gtk_widget_get_allocated_height(area);
+	std::vector<std::array<double, 3 >> colors = {
+		{0,1,0},
+		{1,0,0},
+		{0,0,1},
+		{1,1,0},
+		{1,0,1},
+		{0,1,1},
+	};
 
-	//Only display the last 100 records
-	if (w->plotinfo.size() > 100)
-		w->plotinfo.erase(w->plotinfo.begin(), w->plotinfo.begin() + (w->plotinfo.size() - 100));
-
-	//Draw the graphical stats
-	int numelement = w->plotinfo.size();
-	cairo_set_source_rgb(cr, 0, 1, 0);
-	cairo_move_to(cr, 0, height);
-	for (int i = 0; i < numelement; ++i) {
-		auto diff = w->plotinfo[i];
-		long long total_clock = diff.counts[0] + diff.counts[1] + diff.counts[2] + diff.counts[3] + diff.counts[4] + diff.counts[5] + diff.counts[6];
-		double pos = diff.counts[1] *1.0/ total_clock;
-		cairo_line_to(cr, width*i / (max(1,numelement-1)), height - pos*height);
+	std::vector<std::vector<double>>data(6);
+	for (auto&&i : data)
+		i.reserve(pi.size());
+	
+	for (auto&i:pi) {
+		long long total_clock = i.counts[0] + i.counts[1] + i.counts[2] + i.counts[3] + i.counts[4] + i.counts[5] + i.counts[6];
+		double idle_amount = i.idle_count*1.0*sampling_interval.count() / update_interval.count();
+		if (total_clock == 0)
+			total_clock = 1;
+		for (int j = 0; j < 6; ++j)
+			data[j].push_back(i.counts[j+1] * 1.0 / total_clock - idle_amount);
 	}
-	cairo_line_to(cr, width, height);
-	cairo_close_path(cr);
-	cairo_fill(cr);
+	draw_stacked(cr, width, height, data, colors, 0.5);
 	
 	//Update the text stats
-	counter_status diff = *(w->plotinfo.rbegin());
+	
 	double timediff = diff.timediff;
 	double total_clock = diff.counts[0] + diff.counts[1] + diff.counts[2] + diff.counts[3] + diff.counts[4] + diff.counts[5] + diff.counts[6];
-	printf("t = %f: ", timediff);
-	printf("%016llx, %016llx, %016llx, %016llx, %016llx, %016llx, %016llx\n", diff.counts[0], diff.counts[1], diff.counts[2], diff.counts[3], diff.counts[4], diff.counts[5], diff.counts[6]);
+	double idle_amount = diff.idle_count*1.0*sampling_interval.count() / update_interval.count();
+	if (total_clock == 0)
+		total_clock = 1;
 	gtk_label_set_text(GTK_LABEL(w->frequency), (
 		std::to_string(total_clock / 12e6 / timediff) + " MHz").c_str());
 
 	gtk_label_set_text(GTK_LABEL(w->idle), (std::to_string(
-		diff.idle_count*1e2*sampling_interval.count() / update_interval.count())
-		+ " %").c_str());
-
-	gtk_label_set_text(GTK_LABEL(w->stall), (std::to_string(
-		(diff.counts[4] + diff.counts[5] + diff.counts[6])/total_clock*1.e2)
-		+ " %").c_str());
-
-	gtk_label_set_text(GTK_LABEL(w->busy), (std::to_string(
-		(diff.counts[1] + diff.counts[2] + diff.counts[3])/total_clock*1.e2)
+		diff.idle_count*1e2*sampling_interval.count() / update_interval.count()+diff.counts[0]/total_clock*1e2)
 		+ " %").c_str());
 
 	gtk_label_set_text(GTK_LABEL(w->vertex), (std::to_string(
-		(diff.counts[1])/total_clock*1.e2)
+		diff.counts[1] / total_clock*1.e2)
 		+ " %").c_str());
+
 	gtk_label_set_text(GTK_LABEL(w->fragment), (std::to_string(
-		(diff.counts[2])/total_clock*1.e2)
+		diff.counts[2] / total_clock*1.e2)
 		+ " %").c_str());
+
+	gtk_label_set_text(GTK_LABEL(w->valid), (std::to_string(
+		diff.counts[3] / total_clock*1.e2)
+		+ " %").c_str());
+
+	gtk_label_set_text(GTK_LABEL(w->stall_tmu), (std::to_string(
+		diff.counts[4]/total_clock*1.e2)
+		+ " %").c_str());
+
+	gtk_label_set_text(GTK_LABEL(w->stall_sb), (std::to_string(
+		diff.counts[5]/total_clock*1.e2)
+		+ " %").c_str());
+
+	gtk_label_set_text(GTK_LABEL(w->stall_vary), (std::to_string(
+		diff.counts[6] / total_clock*1.e2)
+		+ " %").c_str());
+
+	
 	return FALSE;
 }
 int main(int argc, char *argv[])
@@ -225,13 +261,16 @@ int main(int argc, char *argv[])
     close(fd);
     
 	window w = {};
+	w.plotinfo.resize(100);
     gtk_init(&argc,&argv);
 	GtkBuilder*build=gtk_builder_new_from_string((const gchar*)gtk_window_xml,sizeof(gtk_window_xml));
     w.mainwindow = GTK_WIDGET(gtk_builder_get_object(build, "mainwindow"));
 	w.frequency = GTK_WIDGET(gtk_builder_get_object(build, "frequency"));
 	w.idle = GTK_WIDGET(gtk_builder_get_object(build, "idle"));
-	w.stall = GTK_WIDGET(gtk_builder_get_object(build, "stall"));
-	w.busy = GTK_WIDGET(gtk_builder_get_object(build, "busy"));
+	w.stall_tmu = GTK_WIDGET(gtk_builder_get_object(build, "stall_tmu"));
+	w.stall_sb = GTK_WIDGET(gtk_builder_get_object(build, "stall_sb"));
+	w.stall_vary = GTK_WIDGET(gtk_builder_get_object(build, "stall_vary"));
+	w.valid = GTK_WIDGET(gtk_builder_get_object(build, "valid"));
 	w.vertex = GTK_WIDGET(gtk_builder_get_object(build, "vertex"));
 	w.fragment = GTK_WIDGET(gtk_builder_get_object(build, "fragment"));
 	w.plot = GTK_WIDGET(gtk_builder_get_object(build, "plot"));
