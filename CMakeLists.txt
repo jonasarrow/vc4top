@@ -26,6 +26,6 @@ include(CPack)
 
 add_custom_command(
 	OUTPUT gtk_window.xml.h
-	COMMAND xxd -i gtk_window.xml > gtk_window.xml.h
+	COMMAND xxd -i ${CMAKE_CURRENT_SOURCE_DIR}/gtk_window.xml > gtk_window.xml.h
 	DEPENDS gtk_window.xml
 )

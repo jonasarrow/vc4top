@@ -23,7 +23,7 @@ gtk-3.0 and a recent enough gcc is necessary.
 ### Todo
 * ~~Add installer script/debian package creator~~
 	* Get it to a quality where it might be considered to be included into raspbian/...
-* Make out-of-tree builds possible
+* ~~Make out-of-tree builds possible~~
 * Various constants in the source should not be hardcoded and adjustable
 * Add all those other performance counter sources
 * Make the interface much more configurable
