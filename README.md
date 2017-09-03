@@ -9,14 +9,21 @@ Needs to be run as root.
 ### Compile
 To compile, use cmake
 
-    cmake . && make && sudo ./vc4top
+    cmake . && make && sudo make install/strip
+    sudo vc4top
 
+To generate a debian `deb` file, use
+
+    cmake . && make && make package
+
+This generates `vc4top-${VERSION}-Linux.deb`
 ### Requirements
 gtk-3.0 and a recent enough gcc is necessary.
 
 ### Todo
-* Add installer script/debian package creator
+* ~~Add installer script/debian package creator~~
 	* Get it to a quality where it might be considered to be included into raspbian/...
+* Make out-of-tree builds possible
 * Various constants in the source should not be hardcoded and adjustable
 * Add all those other performance counter sources
 * Make the interface much more configurable
